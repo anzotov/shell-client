@@ -10,16 +10,20 @@ using boost::asio::ip::tcp;
 class ShellClient final
 {
 public:
-    ShellClient(std::istream& m_input, std::ostream& m_output);
+    ShellClient(std::istream &m_input, std::ostream &m_output);
     ~ShellClient();
     void run();
 
 private:
     void telnet(const std::vector<std::string> &params);
     void shell(const std::string &command);
+    void close_socket();
+    void dispatch_command(const std::string &command);
+    tcp::endpoint parse_endpoint(const std::vector<std::string> &params);
 
     boost::asio::io_context m_context;
     tcp::socket *m_socket = nullptr;
-    std::istream& m_input;
-    std::ostream& m_output;
+    std::istream &m_input;
+    std::ostream &m_output;
+    int m_errorCounter = 0;
 };

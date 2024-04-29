@@ -2,8 +2,170 @@
 
 #include <locale>
 #include <vector>
+#include <stdexcept>
 
 using namespace std::literals;
+
+static void trim_left(std::string string);
+static bool contains(const std::string_view input, const char ch);
+static std::vector<std::string> tokenize(const std::string_view input, std::string_view delim = " \t"sv);
+
+ShellClient::ShellClient(std::istream &input, std::ostream &output)
+    : m_input(input), m_output(output)
+{
+}
+
+ShellClient::~ShellClient()
+{
+    delete m_socket;
+}
+
+void ShellClient::run()
+{
+    m_errorCounter = 0;
+    std::string command;
+    for (;;)
+    {
+        if (m_socket != nullptr)
+        {
+            m_output << "#";
+        }
+        std::getline(std::cin, command);
+        trim_left(command);
+        if (command.empty())
+            continue;
+        if (m_socket == nullptr)
+        {
+            dispatch_command(command);
+            continue;
+        }
+        if (command == "exit")
+        {
+            close_socket();
+            continue;
+        }
+        shell(command);
+    }
+}
+
+void ShellClient::telnet(const std::vector<std::string> &params)
+{
+    try
+    {
+        auto endpoint = parse_endpoint(params);
+
+        m_socket = new tcp::socket(m_context);
+
+        boost::system::error_code ec;
+        m_socket->connect(endpoint, ec);
+
+        if (ec)
+        {
+            close_socket();
+            m_output << ec.message();
+        }
+    }
+    catch (const std::logic_error &e)
+    {
+    }
+}
+
+void ShellClient::shell(const std::string &command)
+{
+    boost::system::error_code ec;
+    do
+    {
+        boost::asio::write(*m_socket, boost::asio::buffer(command), ec);
+        if (ec)
+            break;
+
+        static char buf[256];
+        auto len = m_socket->read_some(boost::asio::buffer(buf, sizeof(buf) - 1), ec);
+        if (ec)
+            break;
+
+        buf[len] = 0;
+        m_output << buf << std::endl;
+    } while (0);
+
+    if (ec)
+    {
+        close_socket();
+        m_output << ec.message();
+    }
+}
+
+void ShellClient::close_socket()
+{
+    delete m_socket;
+    m_socket = nullptr;
+}
+
+void ShellClient::dispatch_command(const std::string &command)
+{
+    auto tokens = tokenize(command);
+    if (tokens.empty())
+        return;
+
+    if (tokens[0] == "telnet")
+    {
+        telnet(tokens);
+        return;
+    }
+
+    ++m_errorCounter;
+    m_output << "Wrong command!" << std::endl;
+    if (m_errorCounter >= 3)
+    {
+        throw std::runtime_error("Exiting...");
+    }
+}
+
+tcp::endpoint ShellClient::parse_endpoint(const std::vector<std::string> &params)
+{
+    auto print_usage = [this]()
+    {
+        m_output << "Usage: telnet <ip_address>:<port>" << std::endl;
+    };
+
+    if (params.size() < 2)
+    {
+        m_output << "Not enough parameters" << std::endl;
+        print_usage();
+        throw std::logic_error("");
+    }
+
+    auto sv = std::string_view(params[1]);
+    auto delim = sv.find_first_of(":", 0);
+    if (delim == std::string::npos || delim + 1 >= sv.size())
+    {
+        m_output << "<port> not provided" << std::endl;
+        print_usage();
+        throw std::logic_error("");
+    }
+
+    unsigned long port = 0;
+    try
+    {
+        port = std::stoul(params[1].substr(delim + 1, sv.size() - delim - 1));
+    }
+    catch (const std::exception &e)
+    {
+        m_output << "Invalid <port>" << std::endl;
+        print_usage();
+        throw std::logic_error("");
+    }
+
+    boost::system::error_code ec;
+    auto address = boost::asio::ip::make_address_v4(sv.substr(0, delim), ec);
+    if (ec)
+    {
+        m_output << "Invalid <address>" << std::endl;
+        print_usage();
+        throw std::logic_error("");
+    }
+    return tcp::endpoint(address, port);
+}
 
 static void trim_left(std::string string)
 {
@@ -23,7 +185,7 @@ static bool contains(const std::string_view input, const char ch)
     return false;
 }
 
-static std::vector<std::string> tokenize(const std::string_view input, std::string_view delim = " \t"sv)
+static std::vector<std::string> tokenize(const std::string_view input, std::string_view delim)
 {
     std::vector<std::string> result;
     size_t start = 0, current = 0;
@@ -44,133 +206,4 @@ static std::vector<std::string> tokenize(const std::string_view input, std::stri
         result.push_back(std::string(input.substr(start, current - start)));
     }
     return result;
-}
-
-ShellClient::ShellClient(std::istream &input, std::ostream &output) : m_input(input), m_output(output)
-{
-}
-
-ShellClient::~ShellClient()
-{
-    delete m_socket;
-}
-
-void ShellClient::run()
-{
-    int errorCounter = 0;
-    std::string command;
-    for (;;)
-    {
-        if (m_socket != nullptr)
-        {
-            m_output << "#";
-        }
-        std::getline(std::cin, command);
-        trim_left(command);
-        if (command.empty())
-        {
-            continue;
-        }
-        if (m_socket != nullptr)
-        {
-            shell(command);
-            continue;
-        }
-        auto tokens = tokenize(command);
-        if (!tokens.empty())
-        {
-            if (tokens[0] == "telnet")
-            {
-                telnet(tokens);
-            }
-            else
-            {
-                ++errorCounter;
-                m_output << "Wrong command!" << std::endl;
-                if (errorCounter >= 3)
-                {
-                    throw std::runtime_error("Exiting...");
-                }
-            }
-        }
-    }
-}
-
-void ShellClient::telnet(const std::vector<std::string> &params)
-{
-    auto print_usage = [this]()
-    {
-        m_output << "Usage: telnet <ip_address>:<port>" << std::endl;
-    };
-    if (params.size() < 2)
-    {
-        m_output << "Not enough parameters" << std::endl;
-        print_usage();
-        return;
-    }
-    auto sv = std::string_view(params[1]);
-    auto delim = sv.find_first_of(":", 0);
-    if (delim + 1 >= sv.size())
-    {
-        print_usage();
-        return;
-    }
-
-    unsigned long port = 0;
-    try
-    {
-        port = std::stoul(params[1].substr(delim + 1, sv.size() - delim - 1));
-    }
-    catch (const std::exception &e)
-    {
-        print_usage();
-        return;
-    }
-
-    boost::system::error_code ec;
-    auto address = boost::asio::ip::make_address_v4(sv.substr(0, delim), ec);
-    if (ec)
-    {
-        m_output << ec.message() << std::endl;
-        print_usage();
-    }
-
-    m_socket = new tcp::socket(m_context);
-    m_socket->connect(tcp::endpoint(address, port), ec);
-    if (ec)
-    {
-        delete m_socket;
-        m_socket = nullptr;
-        m_output << ec.message();
-    }
-}
-
-void ShellClient::shell(const std::string &command)
-{
-    if (command == "exit")
-    {
-        delete m_socket;
-        m_socket = nullptr;
-        return;
-    }
-    boost::system::error_code ec;
-    do
-    {
-        boost::asio::write(*m_socket, boost::asio::buffer(command), ec);
-        if (ec)
-        {
-            break;
-        }
-
-        static char buf[256];
-        auto len = m_socket->read_some(boost::asio::buffer(buf, sizeof(buf) - 1));
-        buf[len] = 0;
-        m_output << buf << std::endl;
-    } while (0);
-    if (ec)
-    {
-        delete m_socket;
-        m_socket = nullptr;
-        m_output << ec.message();
-    }
 }
