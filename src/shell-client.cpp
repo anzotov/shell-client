@@ -32,8 +32,6 @@ void ShellClient::run()
         }
         std::getline(std::cin, command);
         trim_left(command);
-        if (command.empty())
-            continue;
         if (m_socket == nullptr)
         {
             dispatch_command(command);
@@ -70,22 +68,30 @@ void ShellClient::telnet(const std::vector<std::string> &params)
     }
 }
 
-void ShellClient::shell(const std::string &command)
+void ShellClient::shell(std::string &command)
 {
+    m_context.restart();
     boost::system::error_code ec;
     do
     {
-        boost::asio::write(*m_socket, boost::asio::buffer(command), ec);
-        if (ec)
-            break;
-
-        static char buf[256];
-        auto len = m_socket->read_some(boost::asio::buffer(buf, sizeof(buf) - 1), ec);
-        if (ec)
-            break;
-
-        buf[len] = 0;
-        m_output << buf << std::endl;
+        if (!command.empty())
+        {
+            command += '\0';
+            boost::asio::write(*m_socket, boost::asio::buffer(command), ec);
+            if (ec)
+                break;
+        }
+        m_socket->async_read_some(boost::asio::buffer(m_buf, sizeof(m_buf) - 1), [this](const boost::system::error_code &ec, std::size_t bytes_transferred)
+                                  {
+                                    if(ec)
+                                    {
+                                        close_socket();
+                                        m_output << ec.message();
+                                        return;
+                                    }
+                                    m_buf[bytes_transferred] = 0;
+                                    m_output << m_buf << std::endl; });
+        m_context.run_for(10s);
     } while (0);
 
     if (ec)
