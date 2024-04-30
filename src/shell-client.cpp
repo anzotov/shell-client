@@ -81,16 +81,22 @@ void ShellClient::shell(std::string &command)
             if (ec)
                 break;
         }
-        m_socket->async_read_some(boost::asio::buffer(m_buf, sizeof(m_buf) - 1), [this](const boost::system::error_code &ec, std::size_t bytes_transferred)
-                                  {
-                                    if(ec)
-                                    {
-                                        close_socket();
-                                        m_output << ec.message();
-                                        return;
-                                    }
-                                    m_buf[bytes_transferred] = 0;
-                                    m_output << m_buf << std::endl; });
+        auto read_handler = [this](const boost::system::error_code &ec, std::size_t bytes_transferred)
+        {
+            (void)bytes_transferred;
+            if (ec)
+            {
+                close_socket();
+                m_output << ec.message();
+                return;
+            }
+            std::istream is(&m_buf);
+            std::string line;
+            std::getline(is, line, '\0');
+            m_output << line << std::endl;
+        };
+        boost::asio::async_read_until(*m_socket, m_buf, '\0', read_handler);
+
         m_context.run_for(10s);
     } while (0);
 
@@ -105,6 +111,8 @@ void ShellClient::close_socket()
 {
     delete m_socket;
     m_socket = nullptr;
+    std::istream is(&m_buf);
+    is.ignore(std::numeric_limits<std::streamsize>::max());
 }
 
 void ShellClient::dispatch_command(const std::string &command)

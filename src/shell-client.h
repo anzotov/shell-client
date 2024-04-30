@@ -26,5 +26,5 @@ private:
     std::istream &m_input;
     std::ostream &m_output;
     int m_errorCounter = 0;
-    char m_buf[256];
+    boost::asio::streambuf m_buf;
 };
