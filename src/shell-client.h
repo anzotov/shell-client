@@ -4,6 +4,7 @@
 #include <map>
 #include <functional>
 #include <iostream>
+#include <optional>
 
 using boost::asio::ip::tcp;
 
@@ -11,7 +12,6 @@ class ShellClient final
 {
 public:
     ShellClient(std::istream &m_input, std::ostream &m_output);
-    ~ShellClient();
     void run();
 
 private:
@@ -22,7 +22,7 @@ private:
     tcp::endpoint parse_endpoint(const std::vector<std::string> &params);
 
     boost::asio::io_context m_context;
-    tcp::socket *m_socket = nullptr;
+    std::optional<tcp::socket> m_socket;
     std::istream &m_input;
     std::ostream &m_output;
     int m_errorCounter = 0;

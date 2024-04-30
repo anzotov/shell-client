@@ -15,24 +15,19 @@ ShellClient::ShellClient(std::istream &input, std::ostream &output)
 {
 }
 
-ShellClient::~ShellClient()
-{
-    delete m_socket;
-}
-
 void ShellClient::run()
 {
     m_errorCounter = 0;
     std::string command;
     for (;;)
     {
-        if (m_socket != nullptr)
+        if (m_socket.has_value())
         {
             m_output << "#";
         }
         std::getline(std::cin, command);
         trim_left(command);
-        if (m_socket == nullptr)
+        if (!m_socket.has_value())
         {
             dispatch_command(command);
             continue;
@@ -52,7 +47,7 @@ void ShellClient::telnet(const std::vector<std::string> &params)
     {
         auto endpoint = parse_endpoint(params);
 
-        m_socket = new tcp::socket(m_context);
+        m_socket = tcp::socket(m_context);
 
         boost::system::error_code ec;
         m_socket->connect(endpoint, ec);
@@ -109,8 +104,7 @@ void ShellClient::shell(std::string &command)
 
 void ShellClient::close_socket()
 {
-    delete m_socket;
-    m_socket = nullptr;
+    m_socket.reset();
     std::istream is(&m_buf);
     is.ignore(std::numeric_limits<std::streamsize>::max());
 }
